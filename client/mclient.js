@@ -75,7 +75,7 @@ class MClient {
 		if((mdataSlot.owner.connectionId == this.#connectionId) && !config.echo) return;
 		let buffer = new BufferBuilder();
 		buffer.addUint8Array([PacketType.mdata, mdataSlot.scope]);
-		buffer.addUint32Array([mdataSlot.owner.connectionId, this.#map.id]);
+		buffer.addUint32Array([mdataSlot.owner.connectionId, this.#map ? this.#map.id : 0]);
 		buffer.addUint16Array([mdataSlot.slot]);
 		buffer.addBuffer(mdataSlot.blob);
 		this.ws.send(buffer.get());
