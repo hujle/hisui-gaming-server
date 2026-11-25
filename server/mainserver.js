@@ -77,7 +77,7 @@ class MainServer {
 		return this.#gameNames.has(name);
 	}
 
-	#getTotalPlayers() {
+	getTotalPlayers() {
 		let count = 0;
 		for(let name in this.gameservers) {
 			count += this.gameservers[name].clientsCount;
@@ -85,7 +85,7 @@ class MainServer {
 		return count;
 	}
 
-	#getGamePlayerCounts() {
+	getGamePlayerCounts() {
 		let counts = {};
 		for(let name in this.gameservers) {
 			counts[name] = this.gameservers[name].clientsCount;
