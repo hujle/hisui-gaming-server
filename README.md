@@ -1,6 +1,85 @@
 # hisui-gaming-server
 `WebSocket game server with compact protocol that can broadcast and store player and game states.`
 
+This repository now also serves the [EasyRPGPlayerMultiplayerModFrontend](https://github.com/hujle/EasyRPGPlayerMultiplayerModFrontend) as an integrated web application.
+
+## URL routing
+
+When running, the server exposes:
+
+| URL | Description |
+|---|---|
+| `/` | Game selection page (player counts, game cards) |
+| `/<game>/` | Dedicated player page for that game |
+| `/api/players` | JSON API for total/game player counts |
+| `/ws` | WebSocket endpoint for multiplayer clients |
+| `/easyrpg-player.html` | Standalone EasyRPG Player page |
+| `/src/*`, `/styles/*`, `/games/*`, `*.wasm`, etc. | Frontend static assets |
+
+Game routes are discovered automatically from the `frontend/games/` directory. Adding a new game folder makes its route available immediately (no backend code changes required).
+
+## Frontend dependency
+
+The frontend is included as a Git submodule at `backend/frontend/`.
+
+### Production / fresh clone
+
+```bash
+git clone --recurse-submodules https://github.com/hujle/hisui-gaming-server.git
+cd hisui-gaming-server
+npm install
+node main
+```
+
+Or, if you already cloned without submodules:
+
+```bash
+git submodule update --init
+npm install
+node main
+```
+
+### Local development with a separate frontend checkout
+
+If you want to work on the frontend repository separately without updating the submodule each time, copy `conf/conf.example.json` to `conf/conf.local.json` and point it at your local checkout:
+
+```bash
+cp conf/conf.example.json conf/conf.local.json
+# edit conf/conf.local.json
+```
+
+Example `conf/conf.local.json`:
+
+```json
+{
+  "server": {
+    "frontendPath": "/path/to/EasyRPGPlayerMultiplayerModFrontend"
+  }
+}
+```
+
+`conf/conf.local.json` is gitignored so it will not affect other clones.
+
+## Game data
+
+Game folders live in the frontend repository under `frontend/games/`. After adding or removing games, regenerate the list:
+
+```bash
+cd frontend
+node build-games-json.js
+```
+
+If you are using the submodule in production, commit and push the frontend changes, then update the backend submodule:
+
+```bash
+cd backend/frontend
+git pull origin main
+cd ../..
+git add frontend
+git commit -m "Update frontend submodule"
+git push
+```
+
 ## Protocol
 ### Server-to-Client
 All server-to-client packets start with a single byte that specifies its type
