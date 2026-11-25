@@ -144,5 +144,13 @@ Possible flags that client can use are
 |Store data for current game|5|
 |Store data for current server|6|
 
+## Dependencies
+
+```bash
+npm install
+```
+
+This installs `express` (for static file serving and routing) and `ws` (WebSocket server).
+
 ## How to run
 `node main`
