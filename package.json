@@ -1,11 +1,15 @@
 {
   "dependencies": {
+<<<<<<< HEAD
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^9.6.0",
     "cookie-parser": "^1.4.7",
     "crypto": "^1.0.1",
     "express": "^4.21.0",
     "uuid": "^14.0.3",
+=======
+    "express": "^4.22.3",
+>>>>>>> 5682d2c51126caad8120478dc337e3632113fdcb
     "ws": "^8.13.0"
   }
 }
