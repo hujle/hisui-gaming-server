@@ -4,11 +4,14 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const MClient = require("../client/mclient");
 const LogHelper = require("../loghelper");
 const MData = require('../multplayerdata/mdata');
 const GameServer = require('./gameserver');
 const conf = require('../conf/conf');
+const authRoutes = require('./auth-routes');
+const { validateSession } = require('./database');
 
 class MainServer {
 	gameservers;
@@ -95,6 +98,9 @@ class MainServer {
 
 	#buildExpressApp() {
 		const app = express();
+		app.use(cookieParser());
+		app.use(express.json());
+		app.use('/api', authRoutes);
 
 		app.get('/api/players', (req, res) => {
 			const game = req.query.game;

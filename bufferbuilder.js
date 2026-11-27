@@ -24,6 +24,14 @@ class BufferBuilder {
 		this.addUintArray(new Uint32Array(uint32list));
 	}
 
+	addUint64Array(uint64list) {
+		for (const val of uint64list) {
+			const buf = Buffer.alloc(8);
+			buf.writeBigUInt64LE(BigInt(val));
+			this.#bufferList.push(buf);
+		}
+	}
+
 	addBuffer(buffer) {
 		this.#bufferList.push(buffer);
 	}

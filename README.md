@@ -12,11 +12,51 @@ When running, the server exposes:
 | `/` | Game selection page (player counts, game cards) |
 | `/<game>/` | Dedicated player page for that game |
 | `/api/players` | JSON API for total/game player counts |
+| `/api/users/<id>` | JSON API for a user's public profile (username) by 64-bit account id |
 | `/ws` | WebSocket endpoint for multiplayer clients |
 | `/easyrpg-player.html` | Standalone EasyRPG Player page |
 | `/src/*`, `/styles/*`, `/games/*`, `*.wasm`, etc. | Frontend static assets |
 
 Game routes are discovered automatically from the `frontend/games/` directory. Adding a new game folder makes its route available immediately (no backend code changes required).
+
+## User lookup API
+
+Resolve a user's display name from their 64-bit account id (the value returned by
+`EasyRPGMultiplayer.getAccountId()` in the frontend).
+
+```
+GET /api/users/<id>
+```
+
+`<id>` is the account id as a decimal string (the same value the client received
+at login/guest creation). The endpoint is public and only exposes non-sensitive
+fields.
+
+**Success `200`**
+
+```json
+{
+  "id": "122202960792278850",
+  "username": "SomePlayer",
+  "accountType": "registered"
+}
+```
+
+- `username` is `null` for guest accounts that have not picked a display name yet
+  (guest names are stored client-side, not in the account row).
+- `accountType` is `"registered"` or `"guest"`.
+
+**Not found `404`**
+
+```json
+{ "error": "User not found" }
+```
+
+Example:
+
+```bash
+curl https://example.com/api/users/122202960792278850
+```
 
 ## Frontend dependency
 
