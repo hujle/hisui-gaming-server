@@ -114,6 +114,9 @@ class MainServer {
 			} else {
 				response.games = this.getGamePlayerCounts();
 			}
+			res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+			res.set('Pragma', 'no-cache');
+			res.set('Expires', '0');
 			res.json(response);
 		});
 
