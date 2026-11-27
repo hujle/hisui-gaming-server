@@ -11,6 +11,8 @@ When running, the server exposes:
 |---|---|
 | `/` | Game selection page (player counts, game cards) |
 | `/<game>/` | Dedicated player page for that game |
+| `/account` | Your own account info page (total playtime, private guest UUID) |
+| `/account/<id>` | Public profile of another player by 64-bit account id |
 | `/api/players` | JSON API for total/game player counts |
 | `/api/users/<id>` | JSON API for a user's public profile (username) by 64-bit account id |
 | `/ws` | WebSocket endpoint for multiplayer clients |
@@ -42,8 +44,9 @@ fields.
 }
 ```
 
-- `username` is `null` for guest accounts that have not picked a display name yet
-  (guest names are stored client-side, not in the account row).
+- `username` is the account's display name. For guests this is the persistent
+  `guest_name` (may be `null` until the guest picks a name) and is **not** required
+  to be unique. For registered accounts it is the unique login name.
 - `accountType` is `"registered"` or `"guest"`.
 
 **Not found `404`**
@@ -57,6 +60,36 @@ Example:
 ```bash
 curl https://example.com/api/users/122202960792278850
 ```
+
+## Accounts and guests
+
+Guest accounts are first-class, persistent accounts. They are created
+automatically on the first visit (no user action required) and only need a
+display name. Unlike registered accounts they have no password and their name
+does not have to be unique.
+
+| Method & path | Description |
+|---|---|
+| `POST /api/auth/guest` | Create (or return the current) guest account. Returns `accountId`, `guestUuid`, `authToken`. |
+| `POST /api/auth/guest/name` | Set the current guest's display name. Body: `{ "username": "Name" }`. Persists server-side. |
+| `POST /api/auth/guest/load` | Switch to an existing guest by UUID. Body: `{ "guestUuid": "..." }`. |
+| `POST /api/auth/register` | Create a registered account. Body: `{ "username", "password", "guestUuid?" }`. If `guestUuid` is supplied that guest is converted; otherwise a brand-new account is created. |
+| `POST /api/auth/login` | Log in with `{ "username", "password" }`. |
+| `POST /api/auth/logout` | Clear the current session. |
+| `GET /api/auth/me` | Current account profile (includes `playtimeTotal`, `playtimeByGame`). |
+| `POST /api/account/playtime` | Add playtime. Body: `{ "gameId": "...", "seconds": 120 }`. Accumulates the total and the per-game breakdown. |
+| `POST /api/auth/guest/recover` | Legacy: refresh/load a guest by UUID (kept for older clients). |
+
+Playtime is stored per account (total plus a per-game breakdown). Because it is
+keyed by account id, it is preserved automatically when a guest is converted
+into a registered account. Only the total is exposed publicly; the per-game
+breakdown is recorded but not displayed yet.
+
+The guest UUID is **private**: it is only returned by `/api/auth/me` (your own
+session) and is never included in the public `/api/users/<id>` profile.
+
+The guest UUID is shown in the UI (with a copy button) so it can be pasted into
+**Register** (to convert that guest) or **Load Guest Account** (to switch to it).
 
 ## Frontend dependency
 

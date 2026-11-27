@@ -55,7 +55,27 @@ function initializeSchema() {
     `);
 }
 
+function ensureGuestNameColumn() {
+    const columns = db.prepare('PRAGMA table_info(accounts)').all();
+    if (!columns.some((column) => column.name === 'guest_name')) {
+        db.exec('ALTER TABLE accounts ADD COLUMN guest_name TEXT');
+    }
+}
+
+function ensurePlaytimeColumns() {
+    const columns = db.prepare('PRAGMA table_info(account_data)').all();
+    const names = columns.map((column) => column.name);
+    if (!names.includes('playtime_total')) {
+        db.exec('ALTER TABLE account_data ADD COLUMN playtime_total INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!names.includes('playtime_by_game')) {
+        db.exec("ALTER TABLE account_data ADD COLUMN playtime_by_game TEXT NOT NULL DEFAULT '{}'");
+    }
+}
+
 initializeSchema();
+ensureGuestNameColumn();
+ensurePlaytimeColumns();
 
 function generateAccountId() {
     const buffer = crypto.randomBytes(8);
@@ -119,21 +139,21 @@ function createGuestAccount() {
     const accountId = generateUniqueAccountId();
     const guestUuid = generateUniqueGuestUuid();
     const timestamp = now();
-    const expiresAt = timestamp + GUEST_TTL_MS;
 
+    // Guest accounts are persistent (no expiry): they behave like normal
+    // accounts, they are just created automatically and only need a name.
     const stmt = db.prepare(`
         INSERT INTO accounts (id, account_type, guest_uuid, created_at, last_activity_at, expires_at)
-        VALUES (?, 'guest', ?, ?, ?, ?)
+        VALUES (?, 'guest', ?, ?, ?, NULL)
     `);
-    stmt.run(Number(accountId), guestUuid, timestamp, timestamp, expiresAt);
+    stmt.run(Number(accountId), guestUuid, timestamp, timestamp);
 
     const dataStmt = db.prepare('INSERT INTO account_data (account_id) VALUES (?)');
     dataStmt.run(Number(accountId));
 
     return {
         accountId: accountId.toString(),
-        guestUuid,
-        expiresAt
+        guestUuid
     };
 }
 
@@ -145,6 +165,26 @@ function getGuestAccountByUuid(guestUuid) {
         return { expired: true };
     }
     return account;
+}
+
+function loadGuestAccount(guestUuid) {
+    const stmt = db.prepare('SELECT * FROM accounts WHERE guest_uuid = ? AND account_type = ?');
+    return stmt.get(guestUuid, 'guest');
+}
+
+function setGuestName(guestUuid, username) {
+    const timestamp = now();
+    const result = db.prepare(`
+        UPDATE accounts SET guest_name = ?, last_activity_at = ?
+        WHERE guest_uuid = ? AND account_type = ?
+    `).run(username, timestamp, guestUuid, 'guest');
+
+    if (result.changes === 0) {
+        throw new Error('Guest account not found');
+    }
+
+    const account = loadGuestAccount(guestUuid);
+    return { accountId: account.id.toString(), username };
 }
 
 function refreshGuestAccountExpiration(guestUuid) {
@@ -167,7 +207,7 @@ function createSession(accountId) {
 
 function validateSession(token) {
     const stmt = db.prepare(`
-        SELECT s.*, a.account_type, a.username, a.guest_uuid
+        SELECT s.*, a.account_type, a.username, a.guest_name, a.guest_uuid
         FROM sessions s
         JOIN accounts a ON s.account_id = a.id
         WHERE s.token = ? AND s.expires_at > ?
@@ -177,7 +217,7 @@ function validateSession(token) {
     return {
         accountId: session.account_id.toString(),
         accountType: session.account_type,
-        username: session.username,
+        username: session.username ?? session.guest_name,
         guestUuid: session.guest_uuid,
         expiresAt: session.expires_at
     };
@@ -203,13 +243,19 @@ function getUsernameById(accountId) {
     if (!Number.isFinite(numericId)) {
         return null;
     }
-    const stmt = db.prepare('SELECT id, username, account_type FROM accounts WHERE id = ?');
+    const stmt = db.prepare(`
+        SELECT a.id, a.username, a.guest_name, a.account_type, d.playtime_total
+        FROM accounts a
+        LEFT JOIN account_data d ON d.account_id = a.id
+        WHERE a.id = ?
+    `);
     const account = stmt.get(numericId);
     if (!account) return null;
     return {
         id: account.id.toString(),
-        username: account.username,
-        accountType: account.account_type
+        username: account.username ?? account.guest_name,
+        accountType: account.account_type,
+        playtimeTotal: Number(account.playtime_total) || 0
     };
 }
 
@@ -236,7 +282,7 @@ function registerGuestAccount(guestUuid, username, password) {
         const passwordHash = hashPassword(password);
         const timestamp = now();
 
-        db.prepare('UPDATE accounts SET account_type = ?, username = ?, password_hash = ?, guest_uuid = NULL, last_activity_at = ?, expires_at = NULL WHERE id = ?')
+        db.prepare('UPDATE accounts SET account_type = ?, username = ?, password_hash = ?, guest_uuid = NULL, guest_name = NULL, last_activity_at = ?, expires_at = NULL WHERE id = ?')
             .run('registered', username, passwordHash, timestamp, Number(account.id));
 
         db.prepare('DELETE FROM sessions WHERE account_id = ?').run(Number(account.id));
@@ -245,6 +291,29 @@ function registerGuestAccount(guestUuid, username, password) {
     });
 
     return transaction(guestUuid, username, password);
+}
+
+function createRegisteredAccount(username, password) {
+    const accountId = generateUniqueAccountId();
+    const passwordHash = hashPassword(password);
+    const timestamp = now();
+
+    const transaction = db.transaction(() => {
+        const existingUsername = db.prepare('SELECT 1 FROM accounts WHERE username = ?').get(username);
+        if (existingUsername) {
+            throw new Error('Username already taken');
+        }
+
+        db.prepare(`
+            INSERT INTO accounts (id, account_type, username, password_hash, created_at, last_activity_at)
+            VALUES (?, 'registered', ?, ?, ?, ?)
+        `).run(Number(accountId), username, passwordHash, timestamp, timestamp);
+
+        db.prepare('INSERT INTO account_data (account_id) VALUES (?)').run(Number(accountId));
+    });
+
+    transaction();
+    return { accountId: accountId.toString(), username };
 }
 
 function loginAccount(username, password) {
@@ -270,8 +339,37 @@ function getAccountData(accountId) {
         achievements: JSON.parse(data.achievements || '{}'),
         items: JSON.parse(data.items || '{}'),
         progress: JSON.parse(data.progress || '{}'),
-        customData: JSON.parse(data.custom_data || '{}')
+        customData: JSON.parse(data.custom_data || '{}'),
+        playtimeTotal: Number(data.playtime_total) || 0,
+        playtimeByGame: JSON.parse(data.playtime_by_game || '{}')
     };
+}
+
+function addPlaytime(accountId, gameId, seconds) {
+    const numericId = Number(accountId);
+    const delta = Math.floor(Number(seconds));
+    if (!Number.isFinite(numericId) || !Number.isFinite(delta) || delta <= 0 || !gameId) {
+        return getAccountData(numericId);
+    }
+
+    const transaction = db.transaction(() => {
+        db.prepare('INSERT OR IGNORE INTO account_data (account_id) VALUES (?)').run(numericId);
+
+        const row = db.prepare('SELECT playtime_total, playtime_by_game FROM account_data WHERE account_id = ?').get(numericId);
+        let byGame = {};
+        try {
+            byGame = JSON.parse(row.playtime_by_game || '{}');
+        } catch (_) {
+            byGame = {};
+        }
+        byGame[gameId] = (Number(byGame[gameId]) || 0) + delta;
+
+        db.prepare('UPDATE account_data SET playtime_total = ?, playtime_by_game = ? WHERE account_id = ?')
+            .run((Number(row.playtime_total) || 0) + delta, JSON.stringify(byGame), numericId);
+    });
+
+    transaction();
+    return getAccountData(numericId);
 }
 
 function setAccountData(accountId, key, value) {
@@ -306,6 +404,8 @@ module.exports = {
     db,
     createGuestAccount,
     getGuestAccountByUuid,
+    loadGuestAccount,
+    setGuestName,
     refreshGuestAccountExpiration,
     createSession,
     validateSession,
@@ -315,9 +415,11 @@ module.exports = {
     getUsernameById,
     getAccountByUsername,
     registerGuestAccount,
+    createRegisteredAccount,
     loginAccount,
     getAccountData,
     setAccountData,
+    addPlaytime,
     cleanupExpiredGuests,
     getGuestAccountTtlDays,
     now,

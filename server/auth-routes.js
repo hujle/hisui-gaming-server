@@ -2,6 +2,8 @@ const express = require('express');
 const { 
     createGuestAccount, 
     getGuestAccountByUuid, 
+    loadGuestAccount,
+    setGuestName,
     refreshGuestAccountExpiration,
     createSession, 
     validateSession, 
@@ -10,8 +12,10 @@ const {
     getAccountById,
     getUsernameById,
     registerGuestAccount,
+    createRegisteredAccount,
     loginAccount,
     getAccountData,
+    addPlaytime,
     cleanupExpiredGuests,
     getGuestAccountTtlDays
 } = require('./database');
@@ -83,10 +87,56 @@ router.post('/auth/guest', optionalAuth, (req, res) => {
         accountType: 'guest',
         accountId: account.accountId,
         guestUuid: account.guestUuid,
-        expiresAt: account.expiresAt,
-        ttlDays: getGuestAccountTtlDays(),
+        username: null,
         authToken: session.token
     });
+});
+
+router.post('/auth/guest/load', (req, res) => {
+    const { guestUuid } = req.body;
+    if (!guestUuid) {
+        return res.status(400).json({ error: 'Guest UUID required' });
+    }
+
+    const account = loadGuestAccount(guestUuid);
+    if (!account) {
+        return res.status(404).json({ error: 'Guest account not found' });
+    }
+
+    const session = createSession(account.id);
+    setAuthCookie(res, session.token);
+
+    res.json({
+        authenticated: false,
+        accountType: 'guest',
+        accountId: account.id.toString(),
+        username: account.username ?? account.guest_name,
+        guestUuid: account.guest_uuid,
+        authToken: session.token
+    });
+});
+
+router.post('/auth/guest/name', requireAuth, (req, res) => {
+    const { username } = req.body;
+    if (!username) {
+        return res.status(400).json({ error: 'Username required' });
+    }
+    if (username.length < 3 || username.length > 32) {
+        return res.status(400).json({ error: 'Username must be 3-32 characters' });
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username may only contain letters, numbers, dashes (-) and underscores (_)' });
+    }
+    if (req.auth.accountType !== 'guest' || !req.auth.guestUuid) {
+        return res.status(400).json({ error: 'Not a guest account' });
+    }
+
+    try {
+        const result = setGuestName(req.auth.guestUuid, username);
+        res.json({ accountId: result.accountId, username: result.username });
+    } catch (error) {
+        res.status(404).json({ error: error.message });
+    }
 });
 
 router.post('/auth/guest/recover', (req, res) => {
@@ -120,8 +170,8 @@ router.post('/auth/guest/recover', (req, res) => {
 
 router.post('/auth/register', (req, res) => {
     const { guestUuid, username, password } = req.body;
-    if (!guestUuid || !username || !password) {
-        return res.status(400).json({ error: 'Guest UUID, username, and password required' });
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password required' });
     }
 
     if (username.length < 3 || username.length > 32) {
@@ -135,7 +185,11 @@ router.post('/auth/register', (req, res) => {
     }
 
     try {
-        const result = registerGuestAccount(guestUuid, username, password);
+        // When a guest UUID is supplied, convert that guest account into a
+        // registered one. Otherwise create a brand-new registered account.
+        const result = guestUuid
+            ? registerGuestAccount(guestUuid, username, password)
+            : createRegisteredAccount(username, password);
         const session = createSession(result.accountId);
         setAuthCookie(res, session.token);
 
@@ -232,7 +286,7 @@ router.post('/auth/switch', requireAuth, (req, res) => {
         authenticated: true,
         accountType: targetAccount.account_type,
         accountId: targetAccount.id.toString(),
-        username: targetAccount.username,
+        username: targetAccount.username ?? targetAccount.guest_name,
         guestUuid: targetAccount.guest_uuid,
         authToken: session.token,
         ...accountData
@@ -242,6 +296,16 @@ router.post('/auth/switch', requireAuth, (req, res) => {
 router.post('/auth/cleanup-guests', (req, res) => {
     const deletedCount = cleanupExpiredGuests();
     res.json({ deletedCount });
+});
+
+router.post('/account/playtime', requireAuth, (req, res) => {
+    const { gameId, seconds } = req.body;
+    if (!gameId || typeof gameId !== 'string') {
+        return res.status(400).json({ error: 'gameId required' });
+    }
+
+    const data = addPlaytime(req.auth.accountId, gameId, seconds);
+    res.json({ playtimeTotal: data.playtimeTotal, playtimeByGame: data.playtimeByGame });
 });
 
 router.get('/users/:id', (req, res) => {

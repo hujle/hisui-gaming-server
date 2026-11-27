@@ -117,6 +117,14 @@ class MainServer {
 			res.json(response);
 		});
 
+		// Account info page: /account (own) and /account/<id> (public profile)
+		app.get(['/account', '/account/'], (req, res) => {
+			res.sendFile(path.join(this.#frontendPath, 'account.html'));
+		});
+		app.get('/account/:id', (req, res) => {
+			res.sendFile(path.join(this.#frontendPath, 'account.html'));
+		});
+
 		// Dedicated game page: /<game>/ or /<game>
 		app.get(/^\/([^/]+)\/?$/, (req, res, next) => {
 			const gameName = decodeURIComponent(req.params[0]);
